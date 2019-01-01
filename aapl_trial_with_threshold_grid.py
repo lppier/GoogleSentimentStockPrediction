@@ -1,0 +1,100 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime
+from datetime import timedelta
+import fix_yahoo_finance as yf
+
+data = yf.download("AAPL", start="2013-01-01", end="2018-11-30")
+# data.Close.plot()
+
+df = pd.read_csv("./data/apple_trend.csv")
+# df = df[109:] # 3/1/2016
+df = df[161:]  # 1/1/2017
+# plt.plot(df['Week'], df['Apple: (Worldwide)'])
+
+grid_lower_buy = [-30, -25, -20, -15, -10, -5]
+lower_buy_thres = -40  # if percentage decrease is more than this, buy more <shares_to_buy> shares
+upper_sell_thres = 50  # if percentage increase is more than this, sell <shares_to_sell> shares
+shares_to_buy = 15  # number of shares to buy when buying opportunity
+shares_to_sell = 60  # number of shares to sell when selling opportunity
+best_money_earned = 0
+best_lower_buy = grid_lower_buy[0]
+
+for lower_buy_thres in grid_lower_buy:
+
+    prev = 0
+    money = orig_money = 12000
+    shares = 0  # number of shares on hand
+    transactions = 0
+    percent_inc = 0
+    fiveweek_inc = 0
+
+    for idx, row in df.iterrows():
+        curr = row['Apple: (Worldwide)']
+        week = row['Week']
+        # print(week)
+
+        # Find next available trading day
+        day = 1
+        while True:
+            datetime_object = datetime.strptime(str(week), '%d/%m/%Y') + timedelta(days=day)
+            array = data[data.index.to_pydatetime() == datetime_object]['Close'].values
+            if len(array) > 0:
+                close = array[0]
+                break
+            else:
+                day += 1
+
+        # get index 5 weeks ago
+        fivewksago_idx = max(idx - 10, df.index[0])
+        fivewksago_row = df.loc[[fivewksago_idx]]
+        fivewksago_trend = fivewksago_row['Apple: (Worldwide)'].values[0]
+
+        if prev != 0:
+            percent_inc = (curr - prev) / prev * 100
+            fiveweek_inc = (curr - fivewksago_trend) / fivewksago_trend * 100
+            # print("Percent inc/dec = {0}".format(percent_inc))
+
+        if fiveweek_inc <= lower_buy_thres:
+            print("-- Buy {0} at {1}".format(shares_to_buy, close))
+            if money >= shares_to_buy * close:
+                money -= shares_to_buy * close
+                shares += shares_to_buy
+                transactions += 1
+            else:
+                shares_i_can_still_buy = round(money / close)
+                money -= shares_i_can_still_buy * close
+                shares += shares_i_can_still_buy
+                print("not enough money to buy! buy max {0}".format(shares_i_can_still_buy))
+
+        elif percent_inc >= upper_sell_thres:
+            if shares >= shares_to_sell:
+                print("-- Sell {0} at {1}".format(shares_to_sell, close))
+                money += shares_to_sell * close
+                shares -= shares_to_sell
+            else:
+                print("just sell what i have: {0} at {1}".format(shares, close))
+                money += shares * close
+                shares = 0
+            transactions += 1
+
+        prev = curr
+
+    onhand_shares_worth = shares * close
+    print("*** Lower buy threshold: {0} Upper Sell Threshold: {1}".format(lower_buy_thres, upper_sell_thres))
+    print("Sell on-hand shares + {0} at {1} each".format(onhand_shares_worth, close))
+    print(
+        "{0} transactions, eventual money after selling all shares ${1}".format(transactions,
+                                                                                money + onhand_shares_worth))
+    real_money_earned = money + onhand_shares_worth - (transactions * 20)
+    print(
+        "including transaction fees ${0}".format(real_money_earned))
+    print(
+        "If you bought at original close price 176.. you would be able to get ${0}".format(orig_money / 116.15 * close))
+
+    # save grid search values for best one
+    if real_money_earned > best_money_earned:
+        best_lower_buy = lower_buy_thres
+        best_money_earned = real_money_earned
+
+print("Best lower buy value: {0} revenue {1}".format(best_lower_buy, best_money_earned))
